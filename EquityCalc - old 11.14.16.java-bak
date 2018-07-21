@@ -1,0 +1,483 @@
+package pokerTools;
+
+import java.util.ArrayList;
+
+/**
+ *  Robust class should be designed to be easily portable.
+ *  Main Method to call:
+ *  	float []calcEnum(Pocket pockets[][], Card board[], Card dead[]);
+ *  
+ *   		Takes an array of possible pockets for multiple players as well as known board and dead cards
+ *   		This function enumerates, and won't care how it long it takes
+ *   		Returns an array of floats to show equities
+ *   
+ *   	float []calcSample(Pocket pockets[][], Card board[], Card dead[], long sample);
+ *   		
+ *   		Same as above except will determine equity based on a sample.  (TODO)
+ *   
+ *   	long numCalcsEnum(Pocket pockets[][], Card board[], Card dead[]);
+ *   
+ *   		Returns the number of calculations expected to have to make.  
+ *   
+ *   
+ *   	EquityCalcObserver interface will couple this class with the class responsible for displaying values.
+ *   		calcEnum mainly will use it to update progress. Required in constructor.  
+ */
+/*
+ * TODO: 
+ * bugs:
+ *  1) *likely fixed* Some ranges do not work properly, for example:  (22+,ATs+ vs TT+,AQo+,  AQo+ vs AQs+) -- these fixed
+ */
+public class EquityCalc {
+	
+	private static final Card[] EMPTY_CARD_ARRAY = new Card[0]; // for use with overloaded methods
+	private static final int HUGAMES = 1712304; 
+	
+	PreflopOddsMatrix preflopOddsMatrix = null;  //only initialized by getFromMatrix(), no need to use memory if we don't need to
+	boolean useMatrix = true; 					//prob only for debugging purposes
+	
+	private Deck deck;   //only one deck will ever be used for calcs
+	
+	EquityCalcObserver resultsObserver;
+	/*
+	 * This observer is the way all the functions will notify the user of the in progress results. This is meant to be implemented by a GUI
+	 */
+	public EquityCalc (EquityCalcObserver o) {
+		resultsObserver = o;
+	}
+	
+	/**
+	 * This method can be called by the GUI to inform the user how many calculations are expected and to 
+	 * draw a progress bar and (possibly) to calculate the estimated time.
+	 * 
+	 * @param pockets  A range of possible pockets for a number of players
+	 * @param board The cards on the board
+	 * @param dead Any dead cards
+	 * @return long The number of expected calculations in an enumeration
+	 */
+	public long numCalcsEnum(Pocket pockets[][], Card board[], Card dead[]) { 
+		/* Don't pass null if board or dead are empty.  Pass an empty array.
+		 * Alternatively, there are overloaded functions numCalcsEnum(Pocket pockets[][]) ...
+		 * 
+		 */
+		//TODO: must account for duplicate cards
+		double numCalcs=0;
+		int deckSize = 52;
+		
+		if (pockets == null || board == null || dead == null) { return 0;} 
+		if (pockets.length < 2) { return 0; }
+		
+		for (int cc = 0; cc<pockets.length;cc++) {
+			if(cc==0) numCalcs += pockets[cc].length;
+			else numCalcs *= pockets[cc].length;
+			deckSize -= 2;
+		}
+		
+		deckSize -= board.length - dead.length;
+		if(board.length == 0) { //preflop
+			numCalcs *= combinations(deckSize,5);
+		}
+		else if(board.length == 3) { //flop
+			numCalcs *= combinations(deckSize,2);
+		}
+		else if(board.length == 4) { //turn
+			numCalcs *= deckSize;
+		}
+		else return 0L; // river?  lol
+		
+		if (numCalcs > Long.MAX_VALUE) return Long.MAX_VALUE;
+		else return (long) numCalcs;
+		
+	}
+	
+
+	/**
+	 * The main method of this class. The purpose of this method is to determine an equity percentage of a Holdem Hand or range versus another 
+	 * Holdem Hand or range. For example, if a player has JJ and is unsure of his opponents holdings but is pretty sure it contants all pairs
+	 * above 99, all AKs, and all AQs, the known JJ hand (JsJh) will be passed as pockets[0][0]. The opponents range will then be passed 
+	 * into pockets[1][...] which would be a possible 68 total hands: 9h9d 9s9d.... AsAh.
+	 * 
+	 * The JJ hand would be tested against all the 68 hands and (over 1.7 million games per matchup), and the final number of wins for each
+	 * would be returned. It will also update the progress on the enumeration through the EquityCalcObserver interface.
+	 * @param pockets[][] Pocket class that represents a preflop Holdem hand.
+	 * @param board[] Card class for the cards on the board 
+	 * @param dead[] Any dead cards that should be excluded
+	 * @return Each player's wins, ties, and the number of games For example: [0][0] wins [0][1] ties [0][2] number of games (number of games should be same for every player
+	 */
+	long [][]calcEnum(Pocket pockets[][], Card board[], Card dead[]) {
+		float results[] = new float[pockets.length];  // updated at end based on numGames and numWins
+		long numWins[] = new long[pockets.length];
+		long numTies[] = new long[pockets.length];
+		long numGames = 0;
+		deck = new Deck();
+		
+		//test variables
+		long numWins0 = 0; long numWins1 = 0;
+		
+		long totalNumGames = numCalcsEnum(pockets,board,dead); //totaNumGames used to update progress for observers
+
+		if (pockets.length < 2) {
+			return new long[0][0]; //not throwing exceptions in this class, callers need to be aware of what they are passing
+		}
+		/*
+		 * TODO: handle stupid large calcs... or just don't worry about it (might at least need to check for when long isn't big enough)
+		 */
+		
+		//each int in this array will hold a value corresponding to which pocket is used for current hand.
+		int iterator[] = new int[pockets.length];
+		for (int c=0;c<iterator.length;c++) {
+			iterator[c] = 0;  
+		}
+		
+		//used for each hand
+		int bestValue;
+		
+		for (int c = 0; c < numWins.length; c++) { // init arrays
+			numWins[c] = 0;
+			numTies[c] = 0;
+			results[c] = 0;
+		}
+		
+		boolean done = false;  // if this is set to true, we break out 
+		top:
+		while (!done && !resultsObserver.checkStop()) {
+			/* Break and Continues: in code to END while checking for duplicate cards
+			 */
+			for (int c = iterator.length-1;c>=0;c--) { 
+				/*
+				 * choosing hands, all must compare, this loop looks for a single iterator to increase. if an iterator is already at the end
+				 * of the list of hands for a player, it goes to the next until it finds one it can increment, then breaks out of loop
+				 */
+				if (iterator[c]+1 == pockets[c].length) { 
+					iterator[c] = 0;
+					if (c == 0) done = true;   
+				} else {  
+					iterator[c]++; 		//put remove from deck here so we can pick next combo if has duplicates?
+					break;
+				}
+			}
+			
+			/*
+			 * done choosing hands, now it's time to loop through each hand and get its value, determine winner, update games, etc.
+			 */
+			//remove all cards from the deck (have to create new one for each hand combo
+			deck.setDeck();
+			for (int c = 0; c < pockets.length; c++) {
+				if (!removeFromDeck(pockets[c][iterator[c]].getCards())) {
+					continue top;  // if we found a duplicate card, it's ok, we just start main loop over and choose new combo
+				}
+			}
+			
+			if (!removeFromDeck(board) || !removeFromDeck(dead)) {
+				continue;
+			}
+			
+			//Matrix:
+			//if we only have two hands, try to get results from the matrix
+			if(pockets.length==2 && board.length==0 && dead.length==0) { //anytime we have only 2 pockets and no board or dead cards, the matrix should contain the numWins
+				long tempWins[];
+				if(useMatrix==true && (tempWins = getFromMatrix(pockets[0][iterator[0]].normalizeMatchupBits(pockets[1][iterator[1]]))) != null) {					// strange if it equals null but no matter will just continue normally without matrix
+
+					if (pockets[0][iterator[0]].getNum() > pockets[1][iterator[1]].getNum()) {  //TODO: change to proper
+						numWins[0] += tempWins[0]; numWins[1] += tempWins[1];
+					} else {
+						numWins[1] += tempWins[0]; numWins[0] += tempWins[1];
+					}
+					//debug
+					//System.out.printf("M:%s vs %s, %d %d\n",pockets[0][iterator[0]].getString(),pockets[1][iterator[1]].getString(),(numWins[0]-numWins0), (numWins[1]-numWins1));
+					numWins0=numWins[0];numWins1=numWins[1];
+					numTies[0] += (HUGAMES - tempWins[0] - tempWins[1]);
+					numTies[1] += (HUGAMES - tempWins[0] - tempWins[1]);
+					numGames += HUGAMES;
+					continue; //all done so continue top loop
+				}
+					
+			}
+
+			/* END: break and continue statements, done removing cards
+			 * We  now have a set of pockets to evaluate and a deck to use
+			 */
+			
+			//here we know which hands we are comparing
+			
+			
+			/*
+			 * Time to cycle through the deck and declare a winner and update numWins[], numTies[], and numGames
+			 * get an array of cards to represent the deck and then cycle through based on the length of board.
+			 * hmm, how to make this efficient without using 3 different loops for pre, flop, and turn? recursion?
+			 * 
+			 * We are going to have a 7 card array and so will draw from the deck based on how many spots to fill
+			 * it will always be 2 + board.length. an iterator array will work fine
+			 */
+			
+			int comboL = 7-2-board.length;  // the length of the combinations will have to get from deck
+			int deckIterator[] = new int[comboL];
+
+			Card cardArray[] = deck.getDeckArray();
+			Card comboArray[] = new Card[comboL];
+			int deckL = cardArray.length;
+			int cc=0; //cc manages deckIterator, ii manages cardArray 
+			int ii=0; // variables to build combos into deckIterator
+			int handValue[] = new int[pockets.length];
+			boolean tie;
+			
+			while (cc>=0 && !resultsObserver.checkStop())  
+			{
+				
+				if (ii <= (deckL + (cc - comboL))) { //StackOverflow algorithm 
+					deckIterator[cc] = ii;
+					
+					if (cc == comboL-1) {
+						ii++;
+						
+						//magic here
+						//first get the new combos
+						numGames++;
+						for (int c=0;c<comboL;c++){
+							comboArray[c] = cardArray[deckIterator[c]];
+						}
+						//TODO: There is optimization here somewhere by removing the above reference changes
+						//somehow have to pass the cardArray[deckIterator[c]] directly to handvalue without using comboArray
+						
+						//Find values for each hand
+						bestValue=0;
+						tie = false;
+
+						for (int c=0;c<pockets.length;c++) {
+							if((handValue[c]=findHandValue(pockets[c][iterator[c]],board,comboArray))>bestValue) {
+								bestValue = handValue[c]; tie = false;
+							}
+							else if(handValue[c]==bestValue) tie=true;  //if hand value is same as bestvalue, must be a tie.
+						}
+						
+						//now cycle through again and update ties and wins
+						for (int c=0;c<pockets.length;c++) {
+							if (handValue[c] == bestValue) {
+								if (tie) numTies[c]++;   //choose here if a tie is a win
+								else numWins[c]++;
+							} 
+						}
+						/*
+						 * DEBUG
+						 *
+						System.out.printf("Comparing: %s to %s on ",pockets[0][iterator[0]].getString(),pockets[1][iterator[1]].getString());
+						for (Card c: board) {
+							System.out.print(c.getCardStr());
+						}
+						for (Card c: comboArray) {
+							System.out.print(c.getCardStr());
+						}
+						System.out.println();
+						System.out.printf("%d %d:", deckL,comboL);
+						for (int i : deckIterator) {
+							System.out.printf("%d ", i);
+						}
+						for (int i : handValue) {
+							System.out.print(i + " ");
+						}
+						System.out.println("Bestvalue: " + bestValue);
+						updateResults(numWins,numTies,numGames,totalNumGames);
+						/* DEBUG END
+						 */
+						/* all done?
+						 */
+						
+						
+						/* update
+						 * We'll just update at a 100,000 hands for now. Later may need to adjust
+						 */
+						
+						if (numGames%400000==0 || (numGames==1&&totalNumGames>100000)) { updateResults(numWins,numTies,numGames,totalNumGames,false);} // TODO: make time based 
+					}
+					else {
+						ii = deckIterator[cc]+1;
+						cc++;
+					}
+					
+				} else {
+					cc--;
+					if (cc > 0) ii = deckIterator[cc]+1;
+					else ii = deckIterator[0]+1;
+				}
+				
+				
+				
+				
+			}
+			//test code - debug	
+			//System.out.printf("E:%s vs %s, %d %d\n", pockets[0][iterator[0]].getString(),pockets[1][iterator[1]].getString(),(numWins[0]-numWins0),(numWins[1]-numWins1));
+			numWins0=numWins[0];numWins1=numWins[1];
+		}  // end top loop
+		
+		/*
+		 * TODO:
+		 * check if numgames==0, which means we got duplicate cards most likely and should notify
+		 */
+		
+		if(numGames==0) {} 
+		
+		// TODO: change all these updateResults calls to be in a RunLater
+		updateResults(numWins,numTies,numGames,totalNumGames,true);
+		// create a 3d array to return
+		long[][] returnResults = new long[pockets.length][3];
+		for (int c = 0; c<pockets.length;c++) {
+			returnResults[c][0] = numWins[c];
+			returnResults[c][1] = numTies[c];
+			returnResults[c][2] = numGames;
+		}
+		return returnResults;
+	}
+	
+	/**
+	 * Helper method to calcEnum for finding the hand value of the current test. Cards still must be extracted from Pocket.
+	 * @param pocket
+	 * @param board
+	 * @param combo
+	 * @return Hand value from HandValue static class
+	 */
+	private int findHandValue(Pocket pocket,Card[] board,Card... combo) {
+		
+		if (board.length + combo.length != 5)  // TODO: extra calc, remove
+			throw new IllegalArgumentException ("Problem in findHandValue.");
+		
+		switch (board.length) { //must be seperated, cannot create new array for speed reasons, (differences seems negligible after tests)
+		case 0: return HandValue.getHandValue(pocket.getCard(0),pocket.getCard(1),combo[0],combo[1],combo[2],combo[3],combo[4]);
+		case 1: return HandValue.getHandValue(pocket.getCard(0),pocket.getCard(1),board[0],combo[0],combo[1],combo[2],combo[3]);
+		case 2: return HandValue.getHandValue(pocket.getCard(0),pocket.getCard(1),board[0],board[1],combo[0],combo[1],combo[2]);
+		case 3: return HandValue.getHandValue(pocket.getCard(0),pocket.getCard(1),board[0],board[1],board[2],combo[0],combo[1]);
+		case 4: return HandValue.getHandValue(pocket.getCard(0),pocket.getCard(1),board[0],board[1],board[2],board[3],combo[0]);
+		case 5: return HandValue.getHandValue(pocket.getCard(0),pocket.getCard(1),board[0],board[1],board[2],board[3],board[4]);
+		default: throw new IllegalArgumentException("bad data findHandValue: equityCalc");
+		}
+		
+		//old code, removed the extra array creation
+		/*Card[] cards = new Card[(2 + board.length + combo.length)];
+		cards[0] = pocket.getCard(0);
+		cards[1] = pocket.getCard(1);
+		int cardsIndex = 2;
+		for (int c = 0; c<board.length; c++) {
+			cards[cardsIndex] = board[c];
+			cardsIndex++;
+		}
+		for (int c = 0; c<combo.length;c ++) {
+			cards[cardsIndex] = combo[c];
+			cardsIndex++;
+		}
+		if (cards.length == 7) 
+			{
+			int value = HandValue.getHandValue(cards);
+			return value;
+			}
+		else return -1;*/
+	}
+	
+	/**
+	 * This method is separated from equityCalc to avoid instantiating a PreflopOddsMatrix if it isn't necessary.
+	 * Once this method is called, it will create the class and lookup the key returning the results.
+	 * @param key produced from pocket.normalizeMatchupBits
+	 * @return numWins for each hand
+	 */
+	private long[] getFromMatrix(int key) {
+		if (preflopOddsMatrix == null)
+			preflopOddsMatrix = new PreflopOddsMatrix();
+		
+		return preflopOddsMatrix.getResults(key);
+	}
+	
+	/**
+	 * Setting this to false will tell calcEnum not to try to lookup the values from the PreflopOddsMatrix. Mostly for testing purposes.
+	 * Default = true
+	 * @param useMatrix
+	 */
+	public void setUseMatrix(boolean useMatrix) {
+		this.useMatrix = useMatrix;
+	}
+	
+	/**
+	 * receives an array of cards and removes them from the  deck
+	 * (to make equitycalc more readable)
+	 */
+	private boolean removeFromDeck(Card[] cardsToRemove) {
+		for (Card c : cardsToRemove) {
+			if (!deck.removeSpecificCard(c)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	
+	/**
+	 * Called from calcEnum to update the observers. See EquityCalcObserver for what values it expects.
+	 * @param numWins Wins per player
+	 * @param numTies Ties per player
+	 * @param numGames Number of games processed so far.
+	 * @param totalNumGames Total number of games expected to process.
+	 * @param force100 boolean true to force progress sent 100
+	 */
+	private void updateResults(long []numWins, long []numTies, long numGames, long totalNumGames, boolean force100) {
+		//TODO: bug here somewhere, after calc complete, sends 75
+		float []results = new float[numWins.length];
+		for(int c=0;c<numWins.length;c++) {
+			results[c] =  ((float)(numWins[c])/(float)numGames)*100;
+			
+		}
+		if (numGames >= totalNumGames || force100==true) resultsObserver.updateEquity(results,100);
+		else resultsObserver.updateEquity(results, (int)((double)((double)numGames/(double)totalNumGames)*100));
+	}
+	
+	/**
+	 * Usually called by constructor.  TODO: arrange for multiple observers
+	 * @param o
+	 */
+	void setCalcObserver (EquityCalcObserver o) {
+		resultsObserver = o;
+	}
+	
+	
+	/**
+	 * Overloaded for easier calls when board and dead don't exist.
+	 * Note: calcEnum should always be called with empty arrays, not null arrays.
+	 */
+	long [][]calcEnum(Pocket pockets[][]) {
+		return calcEnum(pockets,EMPTY_CARD_ARRAY,EMPTY_CARD_ARRAY);
+	}
+	/**
+	 * Overloaded for easier calls when board and dead don't exist.
+	 * Note: calcEnum should always be called with empty arrays, not null arrays.
+	 */
+	
+	long [][]calcEnum(Pocket pockets[][], Card board[]) {
+		return calcEnum(pockets,board,EMPTY_CARD_ARRAY);
+	}
+	/**
+	 * Overloaded for easier calls when board and dead don't exist.
+	 * Note: calcEnum should always be called with empty arrays, not null arrays.
+	 */
+
+	long numCalcsEnum(Pocket pockets[][], Card board[]) {
+		return numCalcsEnum(pockets,board,EMPTY_CARD_ARRAY);
+	}
+	
+	/**
+	 * Overloaded for easier calls when board and dead don't exist.
+	 * Note: calcEnum should always be called with empty arrays, not null arrays.
+	 */
+	long numCalcsEnum(Pocket pockets[][]) {
+		return numCalcsEnum(pockets,EMPTY_CARD_ARRAY,EMPTY_CARD_ARRAY);
+	}
+	
+	private double combinations(int num, int size) {
+		if (size>num) return 0;
+		return factorial(num)/(factorial(num-size)*factorial(size));
+	}
+	
+	private double factorial(int num) {
+		double factorial=0;
+		for (int c = num;c>0;c--) {
+			if (c==num) factorial=num;
+			else factorial *= c;
+		}
+		return factorial;
+	}
+
+}

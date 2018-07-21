@@ -1,0 +1,460 @@
+package pokerTools;
+
+/*
+ * Using this old code for now... slow as shit and desperately needs to be updated. This was
+ * pretty much the first class I programmed when I was learning Java.
+ * It actually may not be so bad to use so long as I program a matrix for preflop calculations.
+ * (which would really need to be done no matter how fast the hand valuation calc is)
+ * 
+ * The good thing about this code is it's easy to print the hand in english using only an int value.
+ * This makes it highly portable for other uses, like a hand history maker.
+ * 
+ * Updates needed:
+ * 	1) Ace is sorted at beginning, wow was I ever that dumb?  Need to change for quicker valuations.
+ *  2) Remove rankvalIfAce() calls to Card class (this remove that function in Card)
+ *  3) Remove calls to rankval and suitval, replace with card.rank.getValue()
+ * 
+ */
+
+public class FiveCardHand {
+	Card[] hand = new Card[5];  // This is the hand
+	int value = -1; // This variable is assigned once, if the value is not -1, the methods assume it is correct.  
+	// it will need to be reset any time a card changes
+	final private int VALUEMULTIPLE = 15;
+	
+
+	
+	// this function will receive five cards and determine its value
+	// the value will be a derived number:
+	// no pair < 1M, 1 pair - 2M, 2pr - 3M, trips - 4M, str8 - 5M, flush - 6M, FH - 7M, quads - 8M, str8flsh - 9M
+	int determineHandValue(){
+		int handvalue = -1;
+	
+		if(checkFiveCards() == false) return -1;
+		sortbyrank();
+		// 	to limit run through, start at one pair, two pair, trips, str8, flush, FH, quads
+	
+		if ((handvalue = isOnePair())!=-1) value = handvalue;
+		else if ((handvalue = isTwoPair())!=-1) value = handvalue;
+		else if ((handvalue = isTrips()) != -1) value = handvalue;
+		else if ((handvalue = isStraight()) != -1) value = handvalue;
+		else if ((handvalue = isFlush()) != -1) value = handvalue;
+		else if ((handvalue = isFull()) != -1) value = handvalue;
+		else if ((handvalue = isQuads()) != -1) value = handvalue;
+		else value = isHighCard();
+		
+		return value;
+	}
+	
+	
+	
+	int addCard(Card card) {
+		/* this function simply adds a card, must check if we already have five cards, in which case returns error
+		 * 
+		 */
+		
+		for(int cc = 0; cc<5; cc++){
+			if(hand[cc]==null){
+				hand[cc] = card;
+				determineHandValue(); // must always call this if hand changes
+				return 0;
+			}
+		}
+		
+		return -1;
+	}
+	
+	int addCard(Card A, Card B, Card C, Card D, Card E){
+		/* will make cards easier to bring in from a seven card hand 
+		 * Should probably make similar methods like these that don't
+		 * check if any cards exist
+		 */
+		for(int cc = 0; cc< 5; cc++){
+			if(hand[cc] != null) { // since this function adds five cards, we should never see a null
+				return -1;
+			}
+			switch(cc){
+			case 0:hand[cc]=A;break;
+			case 1:hand[cc]=B;break;
+			case 2:hand[cc]=C;break;
+			case 3:hand[cc]=D;break;
+			case 4:hand[cc]=E;break;
+			}
+		}
+		determineHandValue();
+		return 0;
+		
+	}
+	
+//	int replaceCard(card A, card B, card C, card D, card E) {
+	
+	int addCard(Card[] card) {
+		/* overloaded for adding multiple cards
+		 * hmm, do we need to overload? 
+		 * must check if room to add this many 
+		 */
+		for(int count = 0;count<card.length;count++){
+			for(int cc = 0; cc<5; cc++){
+				if(hand[cc]==null){
+					hand[cc] = card[count];
+					break;
+				}
+			
+				if (cc == 5) return -1;  // oops we must not have found a place to put it
+		}
+		
+		}
+		determineHandValue();
+		return value;
+		
+		
+	}
+	
+	void print() {
+		// simply prints what we have
+		for (int cc = 0; cc<5; cc++){
+			if(hand[cc]==null) System.out.print("null");
+			else System.out.printf("%c%c ",hand[cc].rank.getChar(),hand[cc].suit.getChar());
+		}
+	}
+	
+	String getHandString() {
+		String hands = "";
+		for (int cc = 0; cc < 5; cc ++ ) {
+			if (hand[cc]==null) hands = hands + " null";
+			else hands = hands + String.format(" %c%c",hand[cc].rank.getChar(),hand[cc].suit.getChar());
+		}
+	return hands;
+	}
+	
+	void printValue() {
+		// prints whatever is in value
+		System.out.print(value);
+	}
+	
+	int getValue() {
+		//returns the value
+		return value;
+	}
+	
+	boolean checkFiveCards() {
+		// if array contains a null, returns False
+		for (int cc = 0; cc<5; cc++) {
+			if(hand[cc] == null) return false;
+		}
+		return true;
+	}
+	
+	String getHandValueString() {
+		String hands = "";
+		for (int cc = 0; cc < 5; cc ++ ) {
+			if (hand[cc]==null) hands = hands + " null";
+			else hands = hands + String.format(" %c%c",hand[cc].rank.getChar(),hand[cc].suit.getChar());
+		}
+	return hands;
+	}
+
+	// this method prints the english of a hand based on its value
+	void printHandValue(){
+		int rank, highcard, lowcard, kicker;
+		int remainder;
+		if (value == -1) determineHandValue();
+		remainder = value % 1000000;
+		rank = value / 1000000;
+		switch (rank)
+		{
+		case 2: System.out.printf("Pair of ");
+			highcard = remainder / VALUEMULTIPLE / VALUEMULTIPLE / VALUEMULTIPLE;
+			kicker = remainder - (highcard*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE);
+			kicker = kicker / VALUEMULTIPLE / VALUEMULTIPLE;
+			System.out.printf("%ss, %s kicker", valtostring(highcard),valtostring(kicker));
+		
+			break;
+		case 3: System.out.printf("Two pairs ");
+				highcard = remainder / VALUEMULTIPLE / VALUEMULTIPLE;
+				lowcard = remainder - (highcard*VALUEMULTIPLE*VALUEMULTIPLE);
+				lowcard = lowcard / VALUEMULTIPLE;
+				kicker = remainder - (highcard*VALUEMULTIPLE*VALUEMULTIPLE) - (lowcard*VALUEMULTIPLE);
+				System.out.printf("%ss and %ss, %s kicker\n", valtostring(highcard),valtostring(lowcard),valtostring(kicker));
+				break;
+		case 4: {System.out.print("Three of a kind ");
+				highcard = remainder / VALUEMULTIPLE / VALUEMULTIPLE;
+				kicker = remainder - highcard*VALUEMULTIPLE*VALUEMULTIPLE;
+				kicker = kicker / VALUEMULTIPLE;
+				System.out.println(valtostring(highcard) + "s " + valtostring(kicker) + " kicker");
+				break;
+				}
+		case 5: {System.out.print("Straight ");
+				highcard = remainder / VALUEMULTIPLE;
+				System.out.println(valtostring(highcard) + " high");
+				break;}
+		case 6: {System.out.print("Flush ");
+				highcard = remainder / VALUEMULTIPLE / VALUEMULTIPLE / VALUEMULTIPLE / VALUEMULTIPLE;
+				System.out.println(valtostring(highcard) + " high");
+				break;}
+		case 7: {
+				highcard = remainder /VALUEMULTIPLE;
+				kicker = remainder - highcard*VALUEMULTIPLE;
+				System.out.println(valtostring(highcard) + "\'s Full of " + valtostring(kicker) + "\'s");
+				break;}
+		case 8: {System.out.print("Quad ");
+				highcard = remainder / VALUEMULTIPLE;
+				kicker = remainder - highcard*VALUEMULTIPLE;
+				System.out.print(valtostring(highcard) + "\'s " + valtostring(kicker) + " kicker\n");
+				break;}
+		
+		case 9: {highcard = remainder / VALUEMULTIPLE;
+				if (highcard == 14) {
+					System.out.println("Royal Flush");
+					break;
+				}
+				System.out.print("Straight Flush ");
+				System.out.println(valtostring(highcard) + " high");
+				}
+		default: System.out.print("High Card ");
+				highcard = remainder / VALUEMULTIPLE /VALUEMULTIPLE /VALUEMULTIPLE /VALUEMULTIPLE;
+				kicker = remainder - (highcard*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE);
+				kicker = kicker / VALUEMULTIPLE / VALUEMULTIPLE/ VALUEMULTIPLE;
+				System.out.printf("%s, %s kicker", valtostring(highcard),valtostring(kicker));
+				break;
+		}
+	}
+	
+	// printHandValue helper
+	String valtostring(int VtoS){
+		String stringValue = null;
+		switch(VtoS)
+		{
+		case 1: stringValue =  "Ace"; break;
+		case 2: stringValue =  "Deuce"; break;
+		case 3: stringValue =  "Trey";break;
+		case 4: stringValue =  "Four";break;
+		case 5: stringValue =  "Five";break;
+		case 6: stringValue =  "Six";break;
+		case 7: stringValue =  "Seven";break;
+		case 8: stringValue =  "Eight";break;
+		case 9: stringValue =  "Nine";break;
+		case 10: stringValue =  "Ten";break;
+		case 11: stringValue =  "Jack";break;
+		case 12: stringValue =  "Queen";break;
+		case 13: stringValue =  "King";break;
+		case 14: stringValue =  "Ace";break;
+		}
+		
+		return stringValue;
+		
+	}
+
+	/* should be called last so will not check
+	 * 
+	 */
+	
+	int isHighCard() {
+	int handvalue = -1;
+		if(hand[0].rankvalIfAce() == 14)
+			handvalue = 0 + hand[0].rankvalIfAce()*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[2].rankval*VALUEMULTIPLE + hand[1].rankval;
+		else handvalue = 0 + hand[4].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[2].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[1].rankval*VALUEMULTIPLE + hand[0].rankval;
+	return handvalue;
+	}
+	
+	
+	/* will be in forms: xxyvz xyyvz xyvvz xyvzz
+	 *  hmm, is there an easy way to sort these kickers?
+	 */
+	
+	int isOnePair() {
+		int handvalue = -1;
+		// xxyvz
+		if(hand[0].rankval==hand[1].rankval && hand[2].rankval!=hand[0].rankval && hand[3].rankval!=hand[0].rankval && hand[4].rankval!=hand[0].rankval && hand[2].rankval!=hand[3].rankval && hand[4].rankval!=hand[3].rankval){
+			if(hand[0].rankvalIfAce() == 14)
+				handvalue = 2000000 + hand[0].rankvalIfAce()*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE + hand[2].rankval;
+			else handvalue = 2000000 + hand[0].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE + hand[2].rankval;
+			} // xyyvz
+		else if(hand[1].rankval == hand[2].rankval && hand[0].rankval != hand[1].rankval && hand[3].rankval != hand[1].rankval && hand[4].rankval != hand[1].rankval && hand[3].rankval != hand[4].rankval) {
+			if(hand[0].rankvalIfAce() == 14)
+				handvalue = 2000000 + hand[1].rankval * VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[0].rankvalIfAce() *VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval * VALUEMULTIPLE + hand[3].rankval;
+			else handvalue = 2000000 + hand[1].rankval * VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE + hand[0].rankval;
+			} // xyvvz
+		else if(hand[2].rankval == hand[3].rankval && hand[0].rankval!=hand[2].rankval && hand[1].rankval!=hand[2].rankval && hand[4].rankval!=hand[2].rankval&&hand[0].rankval!=hand[1].rankval){
+			if(hand[0].rankvalIfAce() == 14)
+				handvalue = 2000000 + hand[2].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[0].rankvalIfAce()*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval*VALUEMULTIPLE + hand[3].rankval;
+			else handvalue = 2000000 + hand[2].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE + hand[0].rankval;
+		} // xyvzz
+		else if(hand[3].rankval == hand[4].rankval && hand[0].rankval!=hand[3].rankval && hand[1].rankval!=hand[3].rankval && hand[2].rankval!=hand[3].rankval && hand[0].rankval!=hand[1].rankval && hand[1].rankval!=hand[2].rankval){
+			if(hand[0].rankvalIfAce() == 14)
+				handvalue = 2000000 + hand[3].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[0].rankvalIfAce()*VALUEMULTIPLE*VALUEMULTIPLE + hand[2].rankval*VALUEMULTIPLE + hand[1].rankval;
+			else handvalue = 2000000 + hand[3].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[2].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[1].rankval*VALUEMULTIPLE + hand[0].rankval; 
+		}
+		return handvalue;
+	}
+	
+	/* isTwoPair() - Will be in forms xxyyz, xxyzz, xyyzz
+	 * only one kicker, highest 
+	 */
+
+	int isTwoPair(){
+		int handvalue = -1;
+		
+		if(hand[0].rankval == hand[1].rankval && hand[2].rankval == hand[3].rankval && hand[0].rankval!=hand[3].rankval && hand[4].rankval!=hand[0].rankval && hand[4].rankval!=hand[3].rankval){
+			//check if Ace
+			if(hand[0].rankvalIfAce() == 14) 
+				handvalue = 3000000 + hand[0].rankvalIfAce()*VALUEMULTIPLE*VALUEMULTIPLE + hand[2].rankval*VALUEMULTIPLE + hand[4].rankval;
+			else handvalue = 3000000 + hand[2].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[0].rankval*VALUEMULTIPLE + hand[4].rankval;
+						
+		} // xxyzz
+		else if (hand[0].rankval==hand[1].rankval && hand[3].rankval==hand[4].rankval && hand[2].rankval!= hand[0].rankval && hand[2].rankval != hand[3].rankval && hand[0].rankval != hand[3].rankval) {
+			if(hand[0].rankvalIfAce() == 14)
+				handvalue = 3000000 + hand[0].rankvalIfAce()*VALUEMULTIPLE*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE + hand[2].rankval;
+			else handvalue = 3000000 + hand[3].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[0].rankval*VALUEMULTIPLE + hand[2].rankval;
+		} // xyyzz pairs never aces
+		else if (hand[1].rankval == hand[2].rankval && hand[3].rankval==hand[4].rankval&& hand[0].rankval != hand[1].rankval && hand[0].rankval != hand[3].rankval && hand[3].rankval != hand[1].rankval){
+			handvalue = 3000000 + hand[3].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[1].rankval*VALUEMULTIPLE + hand[0].rankvalIfAce();
+		}
+		
+		return handvalue;
+	}
+	
+	/* isTrips() -- Will be in forms xxxyz yxxxz yzxxx
+	 *  Must check for kickers being different
+	 */
+	
+	int isTrips(){
+	int handvalue = -1;
+	if(hand.length != 5) return handvalue;
+	
+	//xxxyz
+	if(hand[0].rankval == hand[1].rankval && hand[2].rankval == hand[1].rankval && hand[3].rankval != hand[0].rankval && hand[4].rankval != hand[0].rankval && hand[3].rankval != hand[4].rankval){
+		// trips could be ace, kicker never is
+		handvalue = 4000000 + hand[0].rankvalIfAce()*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval * VALUEMULTIPLE + hand[3].rankval;
+		
+	} // yxxxz
+	else if (hand[0].rankval != hand[1].rankval && hand[1].rankval == hand[2].rankval && hand[2].rankval == hand[3].rankval && hand[3].rankval != hand[4].rankval){
+		// kicker could be ace, trips is never ace
+		if (hand[0].rankvalIfAce()==14) {
+		handvalue = 4000000 + hand[1].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[0].rankvalIfAce()*VALUEMULTIPLE + hand[4].rankval;}
+		else {handvalue = 4000000 + hand[1].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval *VALUEMULTIPLE + hand[0].rankval; }
+	
+	} // yzxxx
+	else if (hand[0].rankval != hand[1].rankval && hand[0].rankval != hand[2].rankval && hand[1].rankval != hand[2].rankval && hand[2].rankval == hand[3].rankval && hand[3].rankval == hand[4].rankval){
+		// kicker could be ace, trips is never ace
+		if (hand[0].rankvalIfAce()==14) {
+			handvalue = 4000000 + hand[2].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[0].rankvalIfAce()*VALUEMULTIPLE + hand[1].rankval;
+		}
+		else handvalue = 4000000 + hand[2].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[1].rankval*VALUEMULTIPLE + hand[0].rankval;
+	}
+	return handvalue;
+	}
+	
+	// the is... functions only get sorted hands
+	// return = s -1 if does not find a straight
+	// only reads a 5 card hand
+	// this shit probably needs a redo
+	int isStraight(){
+		int handvalue = -1;
+		if(hand.length != 5) return handvalue;
+			// will always check the first 5 cards
+		
+		// have to run these checks twice and move an ace if it exists
+
+		if (hand[1].rankval == hand[0].rankval+1 && hand[2].rankval == hand[0].rankval+2 && hand[3].rankval == hand[0].rankval+3 && hand[4].rankval == hand[0].rankval+4) {
+			handvalue = 5000000;
+
+		// check for broadway
+		
+		if (handvalue > -1){
+			// is a straight so determine value of straight and if straight flush
+			if(isFlush() > -1) handvalue = 9000000;
+			handvalue = handvalue + hand[4].rankval*VALUEMULTIPLE;
+		}
+		
+		}
+		//check for broadway
+		if(hand[0].rankval == 1 && hand[1].rankval == 10 && hand[2].rankval == 11 && hand[3].rankval == 12 && hand[4].rankval == 13) {
+			if(isFlush() > -1) handvalue = 9000000 + hand[0].rankvalIfAce()*VALUEMULTIPLE;
+			else handvalue = 5000000 + hand[0].rankvalIfAce()*VALUEMULTIPLE;
+		}
+
+		
+		return handvalue;
+	}
+	
+	// easy one
+	// not finished, needs a value for total ranking!
+	int isFlush() {
+		int handvalue = -1;
+		if(hand.length != 5) return handvalue;
+		
+		if(hand[0].suitval == hand[1].suitval && hand[2].suitval == hand[0].suitval && hand[3].suitval == hand[0].suitval && hand[4].suitval == hand[0].suitval) {
+			// found a flush
+			handvalue = 6000000;
+			// add value based on cards with high card most important
+			if(hand[0].rankval==1) {
+				handvalue = handvalue + hand[0].rankvalIfAce()*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE;
+				handvalue = handvalue + hand[1].rankval + hand[2].rankval*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE;
+				}
+			else {
+				handvalue = handvalue + hand[0].rankval + hand[1].rankval*VALUEMULTIPLE + hand[2].rankval*VALUEMULTIPLE*VALUEMULTIPLE + hand[3].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE + hand[4].rankval*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE*VALUEMULTIPLE;
+				}
+		}
+		
+		return handvalue;
+	}
+	
+	/* isFull() After sorting will be in form xxxyy or yyxxx
+	 * Check for this and assign 7M X * VALUEMULTIPLE + Y
+	 */
+	int isFull(){
+		int handvalue = -1;
+		if(hand.length != 5) return handvalue;
+		
+		if(hand[0].rankval == hand[1].rankval && hand[1].rankval == hand[2].rankval && hand[3].rankval == hand[4].rankval){
+			if(hand[0].rankval == 1) handvalue = 7000000 + hand[0].rankvalIfAce()*VALUEMULTIPLE + hand[4].rankval;
+			else handvalue = 7000000 + hand[0].rankval *VALUEMULTIPLE + hand[4].rankval;
+		}
+		else if(hand[0].rankval == hand[1].rankval && hand[2].rankval == hand[3].rankval && hand[3].rankval == hand[4].rankval){
+			if(hand[0].rankval == 1) handvalue = 7000000 + hand[4].rankval*VALUEMULTIPLE + hand[0].rankvalIfAce();
+			else handvalue = 7000000 + hand[4].rankval *VALUEMULTIPLE + hand[0].rankval;
+		}
+		return handvalue;
+	}
+	
+	/* isQuads() After sorting, quads will be in this form xxxxy or yxxxx
+	 * Check for this and assign 8M to handvalue and add the rankval of the kicker checking for A
+	 * 
+	 */
+	int isQuads() {
+		int handvalue = -1;
+		if (hand.length != 5) return handvalue;
+		
+		if(hand[0].rankval == hand[1].rankval && hand[1].rankval == hand[2].rankval && hand[2].rankval == hand[3].rankval) {
+			// found quads at start, get kicker
+			if(hand[0].rankval == 1) handvalue = 8000000 + hand[0].rankvalIfAce()*VALUEMULTIPLE + hand[4].rankval;
+			else handvalue = 8000000 + hand[0].rankval * VALUEMULTIPLE + hand[4].rankval;		
+		}
+		else if (hand[1].rankval == hand[2].rankval && hand[2].rankval == hand[3].rankval && hand[3].rankval == hand[4].rankval) {
+			if(hand[0].rankval == 1) handvalue = 8000000 + hand[4].rankval*VALUEMULTIPLE + hand[0].rankvalIfAce();
+			else handvalue = 8000000 + hand[4].rankval*VALUEMULTIPLE + hand[0].rankval;
+		}
+		return handvalue;
+	}
+	// sort by rank, this function receives an array of hands and puts them in ascending order by rank
+	// used to make ranking the hand easier
+	// takes up to 7 cards.
+	void sortbyrank() {
+		int min_r, r, c;
+		
+		if (checkFiveCards() == false) return;
+		for ( r = 0; r< hand.length;r++){
+			min_r = r;
+			for(c = r + 1; c < hand.length;c++){
+				if (hand[c].rankval < hand[min_r].rankval) min_r = c;
+				
+			}
+			
+			Card helper = hand[r];
+			hand[r] = hand[min_r];
+			hand[min_r] = helper;
+		}
+	}
+	}
+

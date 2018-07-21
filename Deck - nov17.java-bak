@@ -1,0 +1,155 @@
+package pokerTools;
+import java.util.ArrayList;
+import java.lang.Math;
+
+/*
+ * Holds the deck. Cards should always be removed from the deck first and the methods here used
+ * to obtain the card object
+ * 
+ * Sorting the deck is unimportant... we don't card about the order. If we need to print it in order
+ * for the user, we can sort it at that point.
+ */
+
+public class Deck {
+	ArrayList<Card> deckArray;
+	
+	public Deck () {
+		setDeck();
+	}
+	
+	public void setDeck() {
+		// use Rank and Suit enum inside Card to set the deck
+		deckArray = new ArrayList<Card>();
+		for (Card.Rank r : Card.Rank.values()) {
+			for (Card.Suit s : Card.Suit.values()) {
+				deckArray.add(new Card(r,s));
+			}
+		}
+	}
+	
+	//TODO: create class variables that hole the number left so we don't have to iterate the array every time. SPEED
+	/**
+	 * Returns the number of cards of a particular rank left in the deck.
+	 * @param r Card.Rank enum
+	 * @return int
+	 */
+	int getNumRankLeft(Card.Rank r) {
+		int num=0;
+		for (Card c: deckArray){
+			if (c.rank == r) num++;
+		}
+		return num;
+	}
+	
+	/**
+	 * Returns the number of cards of a particular rank left in the deck except suit of notSuit
+	 * @param r rank to check
+	 * @param notSuit suit to skip
+	 * @return
+	 */
+	int getNumRankLeftNotSuit(Card.Rank r, Card.Suit notSuit) {
+		int num=0;
+		for (Card c: deckArray) {
+			if (c.rank == r && c.suit != notSuit) num++;
+		}
+		return num;
+	}
+	int numCardsLeft() {
+		return deckArray.size();
+	}
+	
+	/**
+	 * Chooses a random card and removes it from the deck.
+	 * @return Card
+	 */
+	Card drawRandomCard() {
+		if (deckArray.size() == 0)
+			throw new IllegalArgumentException("Trying to draw from empty deck");
+		int draw = (int) (Math.random() * deckArray.size());
+		return deckArray.remove(draw);
+	}
+	
+	/**
+	 * Chooses a random card without removing it from the deck.
+	 * @return Card
+	 */
+	Card pickRandomCard() {
+		if (deckArray.size() == 0) 
+			throw new IllegalArgumentException("Trying to pick from empty deck");
+		int draw = (int) (Math.random() * deckArray.size());
+		return deckArray.get(draw);
+	}
+	
+	/**
+	 * picks specific card but doesn't remove from deck
+	 * @param r rank
+	 * @param s suit
+	 * @return Card reference
+	 */
+	Card pickSpecificCard(Card.Rank r, Card.Suit s) {
+		for (int cc =0; cc<deckArray.size();cc++) {
+			if (deckArray.get(cc).rank == r && deckArray.get(cc).suit == s)
+				return deckArray.get(cc);
+		}
+		throw new IllegalArgumentException("pickSpecificCard could not find requested card");
+	}
+	
+	/**
+	 * draws specific card based on Rs format
+	 * @param String Rs = Ranksuit such as Ah
+	 * @return Card the Card
+	 */
+
+	Card drawSpecificCard(String newcard) {
+		// draws a card based on Rs format
+		if(newcard.length() != 2) return new Card(); // return default
+		
+		for (int cc = 0; cc<deckArray.size();cc++) {
+			if (deckArray.get(cc).equalsStr(newcard)) {
+				return deckArray.remove(cc);
+			}
+		}
+		
+		// if we got here that is bad, and user gets default Card
+		return new Card();
+	}
+	
+	public boolean removeSpecificCard(Card newCard)  {
+		return deckArray.remove(newCard);
+		
+	}
+	
+	/**
+	 * returns boolean if passed card is in the deck
+	 * @param r Card.Rank
+	 * @param s Card.Suit
+	 * @return boolean
+	 */
+	public boolean containsCard(Card.Rank r, Card.Suit s) {
+		for (Card c: deckArray) {
+			if (c.suit == s && c.rank == r) return true;
+		}
+		return false;
+	}
+	
+	Card[] getDeckArray() {
+		// this method will be used for equity evaluation. It returns all the cards left in an array
+		Card[] d = new Card[deckArray.size()];
+		deckArray.toArray(d);
+		return d;
+	}
+	
+	ArrayList<Card> getDeckArrayList() {
+		return deckArray;
+	}
+	
+	public void print () {
+		//test
+		for (Card c : deckArray) {
+			c.print();
+		}
+		System.out.println();
+	}
+	
+	
+}
